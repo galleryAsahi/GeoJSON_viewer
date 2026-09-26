@@ -346,6 +346,46 @@
   }
   #map.paint-mode { cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M19 11l-8-8-8.5 8.5a2 2 0 000 2.8l5.7 5.7a2 2 0 002.8 0L19 11z"/><path d="M5 2l3 3"/><circle cx="19" cy="16" r="3" fill="white"/></svg>') 4 20, crosshair; }
 
+  /* ---------- iOS PNG save fallback overlay ---------- */
+  #ios-save-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    background: rgba(10, 13, 18, 0.96);
+    display: flex;
+    flex-direction: column;
+  }
+  .ios-save-bar {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: calc(12px + env(safe-area-inset-top, 0px)) 14px 12px;
+    color: var(--text-0);
+    font-size: 13px;
+    line-height: 1.4;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .ios-save-imgwrap {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    -webkit-overflow-scrolling: touch;
+  }
+  .ios-save-imgwrap img {
+    max-width: 100%;
+    max-height: 100%;
+    width: auto;
+    height: auto;
+    -webkit-touch-callout: default; /* ensure long-press menu is available */
+  }
+
   .hint {
     font-size: 11px;
     color: var(--text-2);
@@ -2001,10 +2041,39 @@
 
   document.getElementById('btn-export').addEventListener('click', () => {
     try {
-      map.once('idle', () => {
+      map.once('idle', async () => {
         const canvas = map.getCanvas();
+        const filename = `geojson_map_${timestamp()}.png`;
+
+        // iOS Safari (and iOS in-app browsers) largely ignore the <a download>
+        // attribute — clicking such a link just opens the image instead of saving
+        // it, so we need iOS-specific handling instead of the desktop/Android path.
+        if (isIOS()) {
+          canvas.toBlob(async (blob) => {
+            if (!blob) { showToast('PNG保存に失敗しました', true); return; }
+            const file = new File([blob], filename, { type: 'image/png' });
+
+            // Preferred path: native Share Sheet, which has a direct "Save Image"
+            // action straight to the Photos app.
+            if (navigator.canShare && navigator.canShare({ files: [file] })) {
+              try {
+                await navigator.share({ files: [file], title: filename });
+                showToast('PNGを共有しました');
+                return;
+              } catch (shareErr) {
+                if (shareErr && shareErr.name === 'AbortError') return; // user cancelled, not an error
+                // fall through to the manual fallback below
+              }
+            }
+            // Fallback: open the image full-screen so the user can long-press
+            // it and choose "Add to Photos" / "画像を保存" themselves.
+            openIOSSaveSheet(blob, filename);
+          }, 'image/png');
+          return;
+        }
+
         const link = document.createElement('a');
-        link.download = `geojson_map_${timestamp()}.png`;
+        link.download = filename;
         link.href = canvas.toDataURL('image/png');
         link.click();
         showToast('PNGを保存しました');
@@ -2014,6 +2083,35 @@
       showToast('PNG保存に失敗しました', true);
     }
   });
+
+  function isIOS() {
+    // Covers iPhone/iPad/iPod, plus iPadOS 13+ which reports as "MacIntel" but has touch support.
+    return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  }
+
+  // Full-screen overlay showing the exported PNG so iOS users can long-press
+  // it and use the native "画像を保存" / "Add to Photos" action, since
+  // programmatic downloads are not reliable in iOS Safari.
+  function openIOSSaveSheet(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const overlay = document.createElement('div');
+    overlay.id = 'ios-save-overlay';
+    overlay.innerHTML = `
+      <div class="ios-save-bar">
+        <span>画像を長押しして「写真に追加」を選んでください</span>
+        <button type="button" class="btn ghost" id="ios-save-close">閉じる</button>
+      </div>
+      <div class="ios-save-imgwrap">
+        <img src="${url}" alt="${escapeHtml(filename)}">
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    document.getElementById('ios-save-close').addEventListener('click', () => {
+      overlay.remove();
+      URL.revokeObjectURL(url);
+    });
+  }
 
   function timestamp() {
     const d = new Date();
