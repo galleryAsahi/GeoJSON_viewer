@@ -12,6 +12,16 @@
     margin: 40px auto;
     padding: 0 16px;
   }
+  h2 {
+    font-size: 1rem;
+    margin-top: 40px;
+    margin-bottom: 8px;
+    border-bottom: 2px solid #333;
+    padding-bottom: 4px;
+  }
+  .section:first-of-type h2 {
+    margin-top: 0;
+  }
   .guide {
     font-size: 0.85rem;
     color: #666;
@@ -35,29 +45,51 @@
     font-size: 1rem;
     cursor: pointer;
   }
-  #result {
+  .result {
     margin-top: 20px;
     font-size: 1.1rem;
     line-height: 1.8;
+  }
+  .nameList {
+    margin-top: 12px;
   }
 </style>
 </head>
 <body>
 
-<div class="guide">
-  ・地域名をスペース区切りで入力（例: 北海道道東 東京 沖縄本島）<br>
-  ・japan_regions_simplified.geojson の区域名・並び順に対応<br>
-  ・並び替え後は、入力したときの表記そのまま出力されます
+<div class="section">
+  <h2>都道府県・細分区域 並び替え</h2>
+  <div class="guide">
+    ・地域名をスペース区切りで入力（例: 北海道道東 東京 沖縄本島）<br>
+    ・japan_regions_simplified.geojson の区域名・並び順に対応<br>
+    ・並び替え後は、入力したときの表記そのまま出力されます
+  </div>
+
+  <textarea id="input1" placeholder="北海道道東 東京 沖縄本島"></textarea>
+  <br>
+  <button onclick="sortByList('input1', 'result1', PREF_ORDER)">並び替え</button>
+
+  <div class="result" id="result1"></div>
+
+  <div class="guide nameList" id="nameList1"></div>
 </div>
 
-<textarea id="input" placeholder="北海道道東 東京 沖縄本島"></textarea>
-<br>
-<button onclick="sortPrefectures()">並び替え</button>
+<div class="section">
+  <h2>地方予報区 並び替え</h2>
+  <div class="guide">
+    ・地方予報区名をスペース区切りで入力（例: 東海 近畿 関東）<br>
+    ・forecast_regions_simplified.geojson の区域名・並び順に対応<br>
+    ・並び替え後は、入力したときの表記そのまま出力されます
+  </div>
 
-<div id="result"></div>
+  <textarea id="input2" placeholder="東海 近畿 関東"></textarea>
+  <br>
+  <button onclick="sortByList('input2', 'result2', FORECAST_ORDER)">並び替え</button>
 
-<hr style="margin-top:30px; border:none; border-top:1px solid #eee;">
-<div class="guide" id="nameList" style="margin-top:16px;"></div>
+  <div class="result" id="result2"></div>
+
+  <div class="guide nameList" id="nameList2"></div>
+</div>
 
 <script>
 // japan_regions_simplified.geojson の code 順・name そのまま
@@ -75,20 +107,32 @@ const PREF_ORDER = [
   "沖縄本島","大東島","宮古島","八重山"
 ];
 
-const MAP = {};
-PREF_ORDER.forEach((name, i) => {
-  MAP[name] = i;
-});
+// forecast_regions_simplified.geojson の code 順・name そのまま（地方予報区）
+const FORECAST_ORDER = [
+  "北海道","東北","関東","伊豆諸島","小笠原","北陸","甲信","東海",
+  "近畿","中国","四国","九州","奄美(群島)","沖縄"
+];
 
-function sortPrefectures() {
-  const items = document.getElementById('input').value.trim().split(/\s+/).filter(Boolean);
-  const sorted = items
-    .filter(item => item in MAP)
-    .sort((a, b) => MAP[a] - MAP[b]);
-  document.getElementById('result').textContent = sorted.join(' ');
+function buildMap(list) {
+  const map = {};
+  list.forEach((name, i) => { map[name] = i; });
+  return map;
 }
 
-document.getElementById('nameList').textContent = '使える名前一覧：' + PREF_ORDER.join(' / ');
+const MAP_PREF = buildMap(PREF_ORDER);
+const MAP_FORECAST = buildMap(FORECAST_ORDER);
+
+function sortByList(inputId, resultId, list) {
+  const map = (list === PREF_ORDER) ? MAP_PREF : MAP_FORECAST;
+  const items = document.getElementById(inputId).value.trim().split(/\s+/).filter(Boolean);
+  const sorted = items
+    .filter(item => item in map)
+    .sort((a, b) => map[a] - map[b]);
+  document.getElementById(resultId).textContent = sorted.join(' ');
+}
+
+document.getElementById('nameList1').textContent = '使える名前一覧：' + PREF_ORDER.join(' / ');
+document.getElementById('nameList2').textContent = '使える名前一覧：' + FORECAST_ORDER.join(' / ');
 </script>
 
 </body>
