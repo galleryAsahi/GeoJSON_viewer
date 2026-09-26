@@ -60,12 +60,12 @@
 <div class="section">
   <h2>都道府県・細分区域 並び替え</h2>
   <div class="guide">
-    ・地域名をスペース区切りで入力（例: 北海道道東 東京 沖縄本島）<br>
+    ・地域名を全角スペース区切りで入力（例: 北海道道東　東京　沖縄本島）<br>
     ・japan_regions_simplified.geojson の区域名・並び順に対応<br>
     ・並び替え後は、入力したときの表記そのまま出力されます
   </div>
 
-  <textarea id="input1" placeholder="北海道道東 東京 沖縄本島"></textarea>
+  <textarea id="input1" placeholder="北海道道東　東京　沖縄本島"></textarea>
   <br>
   <button onclick="sortByList('input1', 'result1', PREF_ORDER)">並び替え</button>
 
@@ -77,12 +77,12 @@
 <div class="section">
   <h2>地方予報区 並び替え</h2>
   <div class="guide">
-    ・地方予報区名をスペース区切りで入力（例: 東海 近畿 関東）<br>
+    ・地方予報区名を全角スペース区切りで入力（例: 東海　近畿　関東）<br>
     ・forecast_regions_simplified.geojson の区域名・並び順に対応<br>
     ・並び替え後は、入力したときの表記そのまま出力されます
   </div>
 
-  <textarea id="input2" placeholder="東海 近畿 関東"></textarea>
+  <textarea id="input2" placeholder="東海　近畿　関東"></textarea>
   <br>
   <button onclick="sortByList('input2', 'result2', FORECAST_ORDER)">並び替え</button>
 
@@ -124,11 +124,11 @@ const MAP_FORECAST = buildMap(FORECAST_ORDER);
 
 function sortByList(inputId, resultId, list) {
   const map = (list === PREF_ORDER) ? MAP_PREF : MAP_FORECAST;
-  const items = document.getElementById(inputId).value.trim().split(/\s+/).filter(Boolean);
+  const items = document.getElementById(inputId).value.trim().split(/[\u3000\s]+/).filter(Boolean);
   const sorted = items
     .filter(item => item in map)
     .sort((a, b) => map[a] - map[b]);
-  document.getElementById(resultId).textContent = sorted.join(' ');
+  document.getElementById(resultId).textContent = sorted.join('\u3000');
 }
 
 document.getElementById('nameList1').textContent = '使える名前一覧：' + PREF_ORDER.join(' / ');
