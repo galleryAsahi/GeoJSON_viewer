@@ -292,6 +292,60 @@
     margin: 14px 0;
   }
 
+  /* ---------- Toggle switch ---------- */
+  .switch { position: relative; display: inline-block; width: 34px; height: 20px; flex-shrink: 0; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch-track {
+    position: absolute; cursor: pointer; inset: 0;
+    background: var(--bg-3); border: 1px solid var(--line);
+    border-radius: 999px; transition: background 0.15s ease, border-color 0.15s ease;
+  }
+  .switch-track::before {
+    content: ""; position: absolute; height: 14px; width: 14px;
+    left: 2px; top: 2px; background: var(--text-1); border-radius: 50%;
+    transition: transform 0.15s ease, background 0.15s ease;
+  }
+  .switch input:checked + .switch-track { background: var(--accent-dim); border-color: var(--accent); }
+  .switch input:checked + .switch-track::before { transform: translateX(14px); background: #fff; }
+
+  /* ---------- Palette (paint mode) ---------- */
+  #palette-panel { margin-top: 10px; }
+  #palette-swatches {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 6px;
+  }
+  .swatch {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1;
+    border-radius: 7px;
+    border: 1px solid var(--line);
+    cursor: pointer;
+    padding: 0;
+    transition: transform 0.08s ease, border-color 0.12s ease;
+  }
+  .swatch:hover { transform: scale(1.08); }
+  .swatch.active { border-color: #fff; box-shadow: 0 0 0 2px var(--accent); }
+  .swatch .swatch-remove {
+    position: absolute; top: -5px; right: -5px;
+    width: 15px; height: 15px; border-radius: 50%;
+    background: var(--bg-0); border: 1px solid var(--line);
+    color: var(--text-1); font-size: 10px; line-height: 13px; text-align: center;
+    cursor: pointer; display: none;
+  }
+  .swatch:hover .swatch-remove { display: block; }
+  .swatch-inline {
+    display: inline-block;
+    width: 12px; height: 12px;
+    border-radius: 3px;
+    border: 1px solid var(--line);
+    vertical-align: middle;
+    position: relative;
+    top: -1px;
+  }
+  #map.paint-mode { cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M19 11l-8-8-8.5 8.5a2 2 0 000 2.8l5.7 5.7a2 2 0 002.8 0L19 11z"/><path d="M5 2l3 3"/><circle cx="19" cy="16" r="3" fill="white"/></svg>') 4 20, crosshair; }
+
   .hint {
     font-size: 11px;
     color: var(--text-2);
@@ -624,6 +678,26 @@
 
           <div class="divider"></div>
 
+          <div class="field-label" style="display:flex;align-items:center;justify-content:space-between;">
+            <span>パレットで塗る</span>
+            <label class="switch">
+              <input type="checkbox" id="palette-mode-toggle">
+              <span class="switch-track"></span>
+            </label>
+          </div>
+          <div class="hint" id="palette-mode-hint">色を選んでから地図上のポリゴンを次々クリックすると、その場で塗れます。</div>
+          <div id="palette-panel" style="display:none;">
+            <div id="palette-swatches"></div>
+            <div class="row" style="margin-top:8px;">
+              <input type="color" id="palette-custom-picker" value="#4fa8ff" title="カスタム色を追加">
+              <input type="text" id="palette-custom-hex" value="#4fa8ff" style="flex:1;" placeholder="カスタムHEX追加">
+              <button class="btn ghost" id="btn-palette-add" title="パレットに追加">追加</button>
+            </div>
+            <div class="hint">選択中の色（<span id="palette-active-swatch" class="swatch-inline"></span>）でクリックしたポリゴンを塗りつぶします。Shiftを押しながらのクリックで消しゴム（個別設定を解除）になります。</div>
+          </div>
+
+          <div class="divider"></div>
+
           <div id="selected-feature-empty" class="hint" style="text-align:center;padding:8px 0;">フィーチャー未選択</div>
           <div id="selected-feature-editor" style="display:none;">
             <div class="field-label" style="margin-bottom:9px;">選択中 <span class="val" id="selected-feature-name"></span></div>
@@ -677,6 +751,9 @@
     selectedLayerId: null,
     selectedFeatureIdx: null, // index within the selected layer's features, or null
     pickMode: false,          // when true, next map click picks a feature into the "個別" panel
+    paintMode: false,         // when true, map clicks paint the active palette color onto the clicked feature
+    palette: ['#4fa8ff', '#ff6b6b', '#ffd166', '#06d6a0', '#a78bfa', '#f472b6', '#ffffff', '#2c333f'],
+    activeSwatch: '#4fa8ff',
     oceanColor: '#183C6B',
     oceanOpacity: 100,
     hasGeoJSON: false,
@@ -872,15 +949,14 @@
     return expr;
   }
 
+  // Note: the polygon/line outline intentionally does NOT follow per-feature fill
+  // colors. If it did, two adjacent polygons painted in different colors would each
+  // draw their shared border in their own fill color, and whichever draws last visually
+  // "swallows" the other — making the boundary between them disappear. Keeping the
+  // outline on the layer's single lineColor guarantees every border stays visible and
+  // consistent regardless of how many features have custom fill colors.
   function buildLineColorExpr(layer) {
-    const keys = Object.keys(layer.featureColors);
-    if (keys.length === 0) return layer.lineColor;
-    const expr = ['case'];
-    for (const k of keys) {
-      expr.push(['==', ['get', '__vidx'], parseInt(k, 10)], layer.featureColors[k]);
-    }
-    expr.push(layer.lineColor);
-    return expr;
+    return layer.lineColor;
   }
 
   function buildLineWidthExpr(layer) {
@@ -1145,7 +1221,9 @@
     updateHighlight();
   }
 
-  // Click on the map: pick the topmost feature under the cursor across all visible layers.
+  // Click on the map: in paint mode, apply the active palette color to whatever
+  // feature is under the cursor (Shift+click erases that feature's custom style).
+  // Otherwise, pick the topmost feature under the cursor into the "個別" panel.
   map.on('click', (e) => {
     if (state.layers.length === 0) return;
     const clickableIds = [];
@@ -1155,6 +1233,29 @@
     }
     if (clickableIds.length === 0) return;
     const hits = map.queryRenderedFeatures(e.point, { layers: clickableIds });
+
+    if (state.paintMode) {
+      if (hits.length === 0) return;
+      const hit = hits[0];
+      const sourceLayer = state.layers.find(l => 'src_' + l.id === hit.source);
+      if (!sourceLayer) return;
+      const vidx = hit.properties && hit.properties.__vidx;
+      if (vidx === undefined || vidx === null) return;
+      if (e.originalEvent && e.originalEvent.shiftKey) {
+        delete sourceLayer.featureColors[vidx];
+        delete sourceLayer.featureLineWidths[vidx];
+      } else {
+        sourceLayer.featureColors[vidx] = state.activeSwatch;
+      }
+      updateLayerPaint(sourceLayer);
+      renderLayerList();
+      if (state.selectedLayerId === sourceLayer.id) {
+        buildFeatureList(sourceLayer, featureSearchInput.value.trim().toLowerCase());
+        if (vidx === state.selectedFeatureIdx) renderSelectedFeatureEditor();
+      }
+      return;
+    }
+
     if (hits.length === 0) {
       // clicked empty space: deselect feature (keep layer selection)
       state.selectedFeatureIdx = null;
@@ -1713,11 +1814,87 @@
 
   btnPickMode.addEventListener('click', () => {
     state.pickMode = !state.pickMode;
+    if (state.pickMode) setPaintMode(false); // mutually exclusive with palette paint mode
     btnPickMode.classList.toggle('active', state.pickMode);
     document.getElementById('map').classList.toggle('pick-mode', state.pickMode);
     document.getElementById('pick-mode-hint').textContent = state.pickMode
       ? '地図上のフィーチャーをクリックしてください。選択後も継続してクリックで切り替えられます。'
       : '地図上のフィーチャーをクリックすると、名前がわからなくても直接選択できます。';
+  });
+
+  // ---------------------------------------------------------------
+  // Palette paint mode: pick a color, then click polygons to fill them.
+  // ---------------------------------------------------------------
+  const paletteModeToggle = document.getElementById('palette-mode-toggle');
+  const palettePanel = document.getElementById('palette-panel');
+  const paletteSwatchesEl = document.getElementById('palette-swatches');
+  const paletteCustomPicker = document.getElementById('palette-custom-picker');
+  const paletteCustomHex = document.getElementById('palette-custom-hex');
+  const btnPaletteAdd = document.getElementById('btn-palette-add');
+  const paletteActiveSwatchEl = document.getElementById('palette-active-swatch');
+
+  function renderPalette() {
+    paletteSwatchesEl.innerHTML = '';
+    const frag = document.createDocumentFragment();
+    state.palette.forEach((color, i) => {
+      const sw = document.createElement('button');
+      sw.className = 'swatch' + (color.toLowerCase() === state.activeSwatch.toLowerCase() ? ' active' : '');
+      sw.style.background = color;
+      sw.title = color;
+      sw.addEventListener('click', () => {
+        state.activeSwatch = color;
+        renderPalette();
+      });
+      const rm = document.createElement('span');
+      rm.className = 'swatch-remove';
+      rm.textContent = '×';
+      rm.title = 'パレットから削除';
+      rm.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        state.palette.splice(i, 1);
+        if (state.palette.length === 0) state.palette.push('#4fa8ff');
+        if (!state.palette.some(c => c.toLowerCase() === state.activeSwatch.toLowerCase())) {
+          state.activeSwatch = state.palette[0];
+        }
+        renderPalette();
+      });
+      sw.appendChild(rm);
+      frag.appendChild(sw);
+    });
+    paletteSwatchesEl.appendChild(frag);
+    paletteActiveSwatchEl.style.background = state.activeSwatch;
+  }
+
+  function setPaintMode(on) {
+    state.paintMode = on;
+    paletteModeToggle.checked = on;
+    palettePanel.style.display = on ? 'block' : 'none';
+    document.getElementById('map').classList.toggle('paint-mode', on);
+    if (on) {
+      // paint mode and single-pick mode are mutually exclusive to avoid ambiguous clicks
+      state.pickMode = false;
+      btnPickMode.classList.remove('active');
+      document.getElementById('map').classList.remove('pick-mode');
+      renderPalette();
+    }
+  }
+
+  paletteModeToggle.addEventListener('change', () => setPaintMode(paletteModeToggle.checked));
+
+  paletteCustomPicker.addEventListener('input', () => {
+    paletteCustomHex.value = paletteCustomPicker.value;
+  });
+  paletteCustomHex.addEventListener('change', () => {
+    if (isValidHex(paletteCustomHex.value)) paletteCustomPicker.value = paletteCustomHex.value;
+  });
+  btnPaletteAdd.addEventListener('click', () => {
+    const hex = paletteCustomHex.value;
+    if (!isValidHex(hex)) { showToast('無効なHEXカラーです', true); return; }
+    if (!state.palette.some(c => c.toLowerCase() === hex.toLowerCase())) {
+      state.palette.push(hex);
+    }
+    state.activeSwatch = hex;
+    renderPalette();
   });
 
   function buildFeatureList(layer, filterText) {
@@ -1843,6 +2020,8 @@
     const pad = (n) => String(n).padStart(2, '0');
     return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
   }
+
+  renderPalette();
 
 })();
 </script>
