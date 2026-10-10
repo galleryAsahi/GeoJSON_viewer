@@ -34,10 +34,10 @@ summary{cursor:pointer;font-weight:700}
 </style>
 </head>
 <body>
-<div id="stage"><canvas id="cv"></canvas><div id="badge">待機中</div><div id="drop">画像をここにドロップもOK</div></div>
+<div id="stage"><canvas id="cv"></canvas><div id="badge">待機中</div><div id="drop">画像・動画をここにドロップもOK</div></div>
 <div id="ctl">
   <div class="row">
-    <label class="btn">🖼 画像を選ぶ<input id="file" type="file" accept="image/*" hidden></label>
+    <label class="btn">🖼 画像・動画を選ぶ<input id="file" type="file" accept="image/*,video/*" hidden></label>
     <button id="go">▶ 揺らす</button>
   </div>
   <div class="sl"><span>震度</span><input id="k" type="range" min="0" max="8" step="1" value="4"><span id="int">5弱</span></div>
@@ -45,6 +45,7 @@ summary{cursor:pointer;font-weight:700}
   <div class="sl"><span>初期微動</span><input id="pd" type="range" min="0" max="10" step="0.5" value="4"><output id="pdo"></output></div>
   <div class="sl"><span>本震の長さ</span><input id="md" type="range" min="5" max="60" step="1" value="20"><output id="mdo"></output></div>
   <div class="sl"><span>揺れの周期</span><input id="per" type="range" min="0.2" max="4" step="0.1" value="0.5"><output id="pero"></output></div>
+  <div class="sl"><span>ブレの強さ</span><input id="blur" type="range" min="0" max="100" step="5" value="50"><output id="bluro"></output></div>
   <p class="mut" id="dist"></p>
   <canvas id="sg"></canvas>
   <div class="row"><label><input id="bg" type="checkbox" checked> 背景も一緒に揺らす</label></div>
@@ -69,13 +70,28 @@ const ph=document.createElement('canvas');ph.width=640;ph.height=420;
 (function(){const c=ph.getContext('2d');const g=c.createLinearGradient(0,0,0,420);g.addColorStop(0,'#6fb1e8');g.addColorStop(1,'#dff0fb');c.fillStyle=g;c.fillRect(0,0,640,420);
 c.fillStyle='#5fa35a';c.fillRect(0,320,640,100);c.fillStyle='#e8d7b9';c.fillRect(200,190,240,150);c.fillStyle='#b8473a';c.beginPath();c.moveTo(180,195);c.lineTo(320,100);c.lineTo(460,195);c.fill();
 c.fillStyle='#6b4a2f';c.fillRect(295,260,50,80);c.fillStyle='#fff';c.fillRect(225,225,45,40);c.fillRect(370,225,45,40);
-c.fillStyle='#1a2330';c.font='bold 26px sans-serif';c.textAlign='center';c.fillText('画像を選ぶと、この家の代わりに揺れます',320,60)})();
+c.fillStyle='#1a2330';c.font='bold 26px sans-serif';c.textAlign='center';c.fillText('画像・動画を選ぶと、この家の代わりに揺れます',320,60)})();
 img=ph;
 
 function resize(){dpr=window.devicePixelRatio||1;let r=cv.getBoundingClientRect();W=r.width;H=r.height;cv.width=W*dpr;cv.height=H*dpr;r=sg.getBoundingClientRect();sg.width=r.width*dpr;sg.height=r.height*dpr;draw()}
 addEventListener('resize',resize);
 
-function loadFile(f){if(!f||!f.type.startsWith('image/'))return;const u=URL.createObjectURL(f);const i=new Image();i.onload=()=>{img=i;draw()};i.src=u}
+let vid=null;
+function loadFile(f){
+  if(!f)return;
+  const isV=f.type.startsWith('video/'),isI=f.type.startsWith('image/');
+  if(!isV&&!isI)return;
+  if(vid){vid.pause();vid=null}
+  const u=URL.createObjectURL(f);
+  if(isV){
+    const v=document.createElement('video');
+    v.muted=true;v.loop=true;v.playsInline=true;v.setAttribute('playsinline','');
+    v.onloadeddata=()=>{img=v;vid=v;v.play().catch(()=>{});draw()};
+    v.src=u;
+  }else{
+    const i=new Image();i.onload=()=>{img=i;draw()};i.src=u;
+  }
+}
 $('file').onchange=e=>loadFile(e.target.files[0]);
 const st=$('stage');
 st.addEventListener('dragover',e=>e.preventDefault());
@@ -101,22 +117,33 @@ function build(){
   P={x,y,n,total,pd,md,en:E,amp};wave=P
 }
 
-function grid(){ctx.strokeStyle=getComputedStyle(document.documentElement).getPropertyValue('--grid')||'#1c2733';ctx.lineWidth=1;ctx.beginPath();
+function grid(){ctx.strokeStyle='#1c2733';ctx.lineWidth=1;ctx.beginPath();
   for(let gx=-200;gx<W+200;gx+=40){ctx.moveTo(gx,-200);ctx.lineTo(gx,H+200)}
   for(let gy=-200;gy<H+200;gy+=40){ctx.moveTo(-200,gy);ctx.lineTo(W+200,gy)}ctx.stroke()}
 
-function draw(t){
-  const i=running&&wave?Math.min(wave.n-1,Math.floor(t*FPS)):-1;
-  const dx=i>=0?wave.x[i]:0,dy=i>=0?wave.y[i]:0,rot=dx*.0006;
+function scene(dx,dy,rot,sh){
   ctx.setTransform(dpr,0,0,dpr,0,0);ctx.fillStyle='#0c1117';ctx.fillRect(0,0,W,H);
   const shakeBg=$('bg').checked;
   if(!shakeBg){grid()}
   ctx.save();ctx.translate(W/2+dx,H/2+dy);ctx.rotate(rot);ctx.translate(-W/2,-H/2);
   if(shakeBg)grid();
-  const iw=img.naturalWidth||img.width,ih=img.naturalHeight||img.height;
+  const iw=img.videoWidth||img.naturalWidth||img.width,ih=img.videoHeight||img.naturalHeight||img.height;
   const s=Math.min(W*.7/iw,H*.7/ih),w=iw*s,h=ih*s;
-  ctx.shadowColor='rgba(0,0,0,.6)';ctx.shadowBlur=18;ctx.shadowOffsetY=6;
+  if(sh){ctx.shadowColor='rgba(0,0,0,.6)';ctx.shadowBlur=18;ctx.shadowOffsetY=6}
   ctx.drawImage(img,(W-w)/2,(H-h)/2,w,h);ctx.restore();
+}
+// 波形の小数インデックスの値（線形補間）
+function samp(f){const a=Math.max(0,Math.floor(f)),b=Math.min(wave.n-1,a+1),r=f-a;return[wave.x[a]*(1-r)+wave.x[b]*r,wave.y[a]*(1-r)+wave.y[b]*r]}
+function draw(t){
+  if(running&&wave){
+    const f=Math.min(wave.n-1,t*FPS),bl=+$('blur').value/100*4; // ブレ＝シャッター時間（最大4フレーム分）
+    if(bl>.05){
+      // 過去の位置を重ね平均して、揺れの向きに流れるブレを作る
+      const N=12;
+      for(let j=0;j<N;j++){const[dx,dy]=samp(Math.max(0,f-bl*j/(N-1)));ctx.globalAlpha=1/(j+1);scene(dx,dy,dx*.0006,false)}
+      ctx.globalAlpha=1;
+    }else{const[dx,dy]=samp(f);scene(dx,dy,dx*.0006,true)}
+  }else scene(0,0,0,true);
   drawSeis(t)
 }
 
@@ -149,12 +176,13 @@ $('go').onclick=()=>running?stop():start();
 function info(){
   const k=+$('k').value,pd=+$('pd').value;
   $('int').textContent=LAB[k];$('desc').textContent='震度'+LAB[k]+'：'+DESC[k];
-  $('pdo').textContent=pd+' 秒';const T=+$('per').value,pt=T<.5?'短周期':T<1.5?'中間':'長周期';$('pero').textContent=T+' 秒（'+pt+'）';$('mdo').textContent=$('md').value+' 秒';
+  $('pdo').textContent=pd+' 秒';const T=+$('per').value,pt=T<.5?'短周期':T<1.5?'中間':'長周期';$('bluro').textContent=$('blur').value+' %';$('pero').textContent=T+' 秒（'+pt+'）';$('mdo').textContent=$('md').value+' 秒';
   $('dist').textContent=pd>0?'震源までの距離の目安：約 '+Math.round(pd*8)+' km（初期微動 '+pd+' 秒 × 8）':'初期微動なし：真下で起きた直下型のイメージです。'
 }
-['k','pd','md','per'].forEach(id=>$(id).addEventListener('input',info));
+['k','pd','md','per','blur'].forEach(id=>$(id).addEventListener('input',info));
 $('bg').addEventListener('change',()=>draw(running?(performance.now()-t0)/1000:0));
 info();resize();
+(function idle(){if(!running&&vid)draw();requestAnimationFrame(idle)})();
 </script>
 </body>
 </html>
