@@ -50,6 +50,15 @@
     inset: 0;
     background: var(--ocean-default);
   }
+  /* Equirectangular world maps use a 2:1 (width:height) canvas. */
+  #app.equirectangular-mode #map {
+    width: min(100vw, 200vh);
+    height: min(100vh, 50vw);
+    inset: auto;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+  }
   #map.pick-mode { cursor: crosshair; }
 
   /* ---------- Top bar ---------- */
@@ -1056,6 +1065,7 @@
 
   function toggleEquirectangularMode() {
     state.equirectangularMode = !state.equirectangularMode;
+    document.getElementById('app').classList.toggle('equirectangular-mode', state.equirectangularMode);
     const btn = document.getElementById('btn-projection');
     btn.textContent = `正距円筒図法 ${state.equirectangularMode ? 'ON' : 'OFF'}`;
     btn.classList.toggle('active', state.equirectangularMode);
@@ -1065,6 +1075,7 @@
       if (source) source.setData(tagFeaturesWithIndex(layer.data));
     }
     setBaseStyle();
+    map.resize();
     updateHighlight();
     if (state.layers.length) fitToAll();
     showToast(state.equirectangularMode
