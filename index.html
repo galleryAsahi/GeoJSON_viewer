@@ -596,6 +596,10 @@
     <button class="btn ghost" id="btn-fit" title="全体表示">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H3v-6M15 3h6v6M21 3l-7 7M3 21l7-7"/></svg>
     </button>
+    <button class="btn" id="btn-equirect" title="疑似正距円筒図法モード（緯度1°と経度1°が同じ長さに見える）">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="1"/><path d="M3 12h18M9 5v14M15 5v14"/></svg>
+      正距円筒
+    </button>
     <button class="btn" id="btn-export">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15V3m0 12l-4-4m4 4l4-4M3 17v3a2 2 0 002 2h14a2 2 0 002-2v-3"/></svg>
       PNG保存
@@ -799,9 +803,36 @@
     hasGeoJSON: false,
     map: null,
     idCounter: 0,
+    equirect: false,     // true: 疑似正距円筒図法モード（緯度をグーデルマン関数で事前変換して描画）
   };
 
   const DEFAULT_PALETTE = ['#4fa8ff', '#ff6b6b', '#5ce39a', '#ffb454', '#c792ea', '#4dd0e1', '#f27ab0', '#a9e34b'];
+
+  // ---------------------------------------------------------------
+  // 疑似正距円筒図法
+  // MapLibre は内部でメルカトル図法固定のため、緯度だけをグーデルマン関数で
+  // 事前変換して描画する。メルカトルの縦伸びが打ち消され、見た目が正距円筒になる。
+  // 元データ（layer.data）は一切変更せず、描画用ソースに渡す直前にだけ変換する。
+  // ---------------------------------------------------------------
+  const D2R = Math.PI / 180, R2D = 180 / Math.PI;
+  const fwdLat = (lat) => (2 * Math.atan(Math.exp(lat * D2R)) - Math.PI / 2) * R2D;                    // 実緯度 → 描画用緯度
+  const invLat = (y) => Math.log(Math.tan(Math.PI / 4 + (Math.max(-85, Math.min(85, y)) * D2R) / 2)) * R2D; // 描画用緯度 → 実緯度
+
+  function projCoord(c) {
+    return state.equirect ? [c[0], fwdLat(c[1]), ...c.slice(2)] : c;
+  }
+  function projY(y) {
+    return state.equirect ? fwdLat(y) : y;
+  }
+  function projCoordsDeep(c) {
+    if (typeof c[0] === 'number') return [c[0], fwdLat(c[1]), ...c.slice(2)];
+    return c.map(projCoordsDeep);
+  }
+  function projectGeometry(g) {
+    if (!state.equirect || !g) return g;
+    if (g.type === 'GeometryCollection') return { ...g, geometries: g.geometries.map(projectGeometry) };
+    return { ...g, coordinates: projCoordsDeep(g.coordinates) };
+  }
 
   // ---------------------------------------------------------------
   // Map init
@@ -843,7 +874,8 @@
   state.map = map;
 
   map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'bottom-right');
-  map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
+  const scaleCtl = new maplibregl.ScaleControl({ unit: 'metric' });
+  map.addControl(scaleCtl, 'bottom-left');
 
   function hexToRgbaStr(hex, alpha) {
     const r = parseInt(hex.slice(1, 3), 16);
@@ -1027,6 +1059,7 @@
       type: 'FeatureCollection',
       features: fc.features.map((f, i) => ({
         ...f,
+        geometry: projectGeometry(f.geometry),
         properties: { ...(f.properties || {}), __vidx: i }
       }))
     };
@@ -1247,7 +1280,7 @@
     const hr = layer.circleRadius;
     src.setData({
       type: 'FeatureCollection',
-      features: [{ ...f, properties: { ...(f.properties || {}), __hw: hw, __hr: hr } }],
+      features: [{ ...f, geometry: projectGeometry(f.geometry), properties: { ...(f.properties || {}), __hw: hw, __hr: hr } }],
     });
     bringHighlightToTop();
   }
@@ -1345,7 +1378,7 @@
         if (y < minY) minY = y;
         if (y > maxY) maxY = y;
       }
-      map.fitBounds([[minX, minY], [maxX, maxY]], { padding: 60, duration: 500, maxZoom: 15 });
+      map.fitBounds([[minX, projY(minY)], [maxX, projY(maxY)]], { padding: 60, duration: 500, maxZoom: 15 });
     } catch (e) { /* ignore */ }
   }
 
@@ -1365,7 +1398,7 @@
       collect(f.geometry);
       if (coords.length === 0) return;
       if (coords.length === 1) {
-        map.flyTo({ center: coords[0], zoom: Math.max(map.getZoom(), 10), duration: 500 });
+        map.flyTo({ center: projCoord(coords[0]), zoom: Math.max(map.getZoom(), 10), duration: 500 });
         return;
       }
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -1375,7 +1408,7 @@
         if (y < minY) minY = y;
         if (y > maxY) maxY = y;
       }
-      map.fitBounds([[minX, minY], [maxX, maxY]], { padding: 100, duration: 500, maxZoom: 16 });
+      map.fitBounds([[minX, projY(minY)], [maxX, projY(maxY)]], { padding: 100, duration: 500, maxZoom: 16 });
     } catch (e) { /* ignore */ }
   }
 
@@ -1402,7 +1435,7 @@
       layer.data.features.forEach(f => collect(f.geometry));
     }
     if (!found) return;
-    map.fitBounds([[minX, minY], [maxX, maxY]], { padding: 60, duration: 500, maxZoom: 15 });
+    map.fitBounds([[minX, projY(minY)], [maxX, projY(maxY)]], { padding: 60, duration: 500, maxZoom: 15 });
   }
 
   // ---------------------------------------------------------------
@@ -2034,6 +2067,25 @@
   // Top bar actions
   // ---------------------------------------------------------------
   document.getElementById('btn-fit').addEventListener('click', fitToAll);
+
+  // 疑似正距円筒モード切替：描画用データだけ再投影し、現在の表示位置は維持する
+  document.getElementById('btn-equirect').addEventListener('click', () => {
+    const c = map.getCenter();
+    const realLat = state.equirect ? invLat(c.lat) : c.lat;   // 切替前の実緯度
+    state.equirect = !state.equirect;
+
+    for (const layer of state.layers) renderLayerOnMap(layer);  // 既存ソースへ setData
+    updateHighlight();
+
+    map.jumpTo({ center: [c.lng, state.equirect ? fwdLat(realLat) : realLat] });
+
+    // メルカトル前提のスケールバーは正距円筒モードでは不正確になるため隠す
+    if (state.equirect) map.removeControl(scaleCtl);
+    else map.addControl(scaleCtl, 'bottom-left');
+
+    document.getElementById('btn-equirect').classList.toggle('active', state.equirect);
+    showToast(state.equirect ? '疑似正距円筒図法モード：ON' : '通常（メルカトル）モード');
+  });
 
   document.getElementById('btn-panel-toggle').addEventListener('click', () => {
     document.getElementById('panel').classList.toggle('collapsed');
