@@ -595,6 +595,7 @@
 
     <div class="spacer"></div>
 
+    <button class="btn" id="btn-equirect" title="正距円筒図法で表示（緯度に比例した縦軸）">正距円筒</button>
     <button class="btn ghost" id="btn-fit" title="全体表示">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H3v-6M15 3h6v6M21 3l-7 7M3 21l7-7"/></svg>
     </button>
@@ -805,6 +806,7 @@
     oceanColor: '#183C6B',
     oceanOpacity: 100,
     hasGeoJSON: false,
+    equirect: false,   // 正距円筒図法で表示するか（表示用の座標変換のみ・元データは不変）
     map: null,
     idCounter: 0,
   };
@@ -851,7 +853,9 @@
   state.map = map;
 
   map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'bottom-right');
-  map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
+  const scaleControl = new maplibregl.ScaleControl({ unit: 'metric' });
+  map.addControl(scaleControl, 'bottom-left');
+  let scaleShown = true;
 
   function hexToRgbaStr(hex, alpha) {
     const r = parseInt(hex.slice(1, 3), 16);
@@ -1029,12 +1033,56 @@
     return expr;
   }
 
+  // ---------------------------------------------------------------
+  // 正距円筒図法（Equirectangular）用の座標変換
+  //   MapLibreはWebメルカトルで描画するため、描画用データの緯度だけを
+  //   「メルカトルで描くと縦位置が緯度に比例する」値に変換して表示します。
+  //   経度はそのまま。元のGeoJSONデータ（layer.data）は書き換えません。
+  //   変換式: 表示緯度 = グーデルマン関数( 緯度[rad] )
+  // ---------------------------------------------------------------
+  const DEG = Math.PI / 180;
+  function latToDisp(lat) {
+    const l = Math.max(-90, Math.min(90, lat));
+    return (2 * Math.atan(Math.exp(l * DEG)) - Math.PI / 2) / DEG;
+  }
+  function latFromDisp(dlat) {
+    const d = Math.max(-85, Math.min(85, dlat));
+    return Math.log(Math.tan(Math.PI / 4 + d * DEG / 2)) / DEG;
+  }
+  // 現在のモードに応じた「表示用の緯度」
+  function dy(lat) { return state.equirect ? latToDisp(lat) : lat; }
+
+  function projectCoords(c) {
+    if (typeof c[0] === 'number') {
+      const out = c.slice();
+      out[1] = latToDisp(c[1]);
+      return out;
+    }
+    return c.map(projectCoords);
+  }
+  function projectGeometry(g) {
+    if (!g) return g;
+    if (g.type === 'GeometryCollection') {
+      return { ...g, geometries: g.geometries.map(projectGeometry) };
+    }
+    if (!g.coordinates) return g;
+    return { ...g, coordinates: projectCoords(g.coordinates) };
+  }
+  function projectFeature(f) {
+    return state.equirect ? { ...f, geometry: projectGeometry(f.geometry) } : f;
+  }
+
+  function fitBoundsDisp(minX, minY, maxX, maxY, opts) {
+    map.fitBounds([[minX, dy(minY)], [maxX, dy(maxY)]], opts);
+  }
+
   function tagFeaturesWithIndex(fc) {
     // clone shallowly and tag with __vidx for per-feature color lookups
+    // （正距円筒モードのときは表示用に緯度を変換）
     return {
       type: 'FeatureCollection',
       features: fc.features.map((f, i) => ({
-        ...f,
+        ...projectFeature(f),
         properties: { ...(f.properties || {}), __vidx: i }
       }))
     };
@@ -1255,7 +1303,7 @@
     const hr = layer.circleRadius;
     src.setData({
       type: 'FeatureCollection',
-      features: [{ ...f, properties: { ...(f.properties || {}), __hw: hw, __hr: hr } }],
+      features: [{ ...projectFeature(f), properties: { ...(f.properties || {}), __hw: hw, __hr: hr } }],
     });
     bringHighlightToTop();
   }
@@ -1353,7 +1401,7 @@
         if (y < minY) minY = y;
         if (y > maxY) maxY = y;
       }
-      map.fitBounds([[minX, minY], [maxX, maxY]], { padding: 60, duration: 500, maxZoom: 15 });
+      fitBoundsDisp(minX, minY, maxX, maxY, { padding: 60, duration: 500, maxZoom: 15 });
     } catch (e) { /* ignore */ }
   }
 
@@ -1373,7 +1421,7 @@
       collect(f.geometry);
       if (coords.length === 0) return;
       if (coords.length === 1) {
-        map.flyTo({ center: coords[0], zoom: Math.max(map.getZoom(), 10), duration: 500 });
+        map.flyTo({ center: [coords[0][0], dy(coords[0][1])], zoom: Math.max(map.getZoom(), 10), duration: 500 });
         return;
       }
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -1383,7 +1431,7 @@
         if (y < minY) minY = y;
         if (y > maxY) maxY = y;
       }
-      map.fitBounds([[minX, minY], [maxX, maxY]], { padding: 100, duration: 500, maxZoom: 16 });
+      fitBoundsDisp(minX, minY, maxX, maxY, { padding: 100, duration: 500, maxZoom: 16 });
     } catch (e) { /* ignore */ }
   }
 
@@ -1410,8 +1458,43 @@
       layer.data.features.forEach(f => collect(f.geometry));
     }
     if (!found) return;
-    map.fitBounds([[minX, minY], [maxX, maxY]], { padding: 60, duration: 500, maxZoom: 15 });
+    fitBoundsDisp(minX, minY, maxX, maxY, { padding: 60, duration: 500, maxZoom: 15 });
   }
+
+  // ---------------------------------------------------------------
+  // 正距円筒 ON/OFF
+  // ---------------------------------------------------------------
+  const btnEquirect = document.getElementById('btn-equirect');
+  function setEquirect(on) {
+    if (state.equirect === on) return;
+    // 現在の画面中心を、切替後の座標系に合わせて保持する
+    const c = map.getCenter();
+    const realLat = state.equirect ? latFromDisp(c.lat) : c.lat;
+    state.equirect = on;
+    btnEquirect.classList.toggle('active', on);
+
+    for (const layer of state.layers) {
+      const src = map.getSource('src_' + layer.id);
+      if (src) src.setData(tagFeaturesWithIndex(layer.data));
+    }
+    updateHighlight();
+
+    map.jumpTo({ center: [c.lng, dy(realLat)] });
+
+    // スケールバーはメルカトル前提の計算なので、正距円筒では非表示にする
+    if (on && scaleShown) { map.removeControl(scaleControl); scaleShown = false; }
+    else if (!on && !scaleShown) { map.addControl(scaleControl, 'bottom-left'); scaleShown = true; }
+
+    showToast(on ? '正距円筒図法で表示中（縦軸＝緯度に比例）' : 'Webメルカトル図法に戻しました');
+    updateStatusChip();
+  }
+  btnEquirect.addEventListener('click', () => {
+    if (!state.hasGeoJSON && !state.equirect) {
+      showToast('GeoJSONを読み込むと正距円筒で表示されます', true);
+      return;
+    }
+    setEquirect(!state.equirect);
+  });
 
   // ---------------------------------------------------------------
   // UI: Layer list
