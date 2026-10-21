@@ -464,6 +464,28 @@
     display: flex;
     flex-shrink: 0;
   }
+  .layer-move {
+    display: flex;
+    flex-shrink: 0;
+    gap: 3px;
+  }
+  .layer-move button {
+    appearance: none;
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    color: var(--text-1);
+    border-radius: 6px;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    font-size: 11px;
+    line-height: 1;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .layer-move button:hover:not(:disabled) { background: var(--bg-3); color: var(--text-0); }
+  .layer-move button:active:not(:disabled) { background: var(--accent); color: #06141f; }
+  .layer-move button:disabled { opacity: 0.25; cursor: not-allowed; }
   .layer-vis-toggle svg { width: 15px; height: 15px; }
   .layer-vis-toggle.hidden-layer { color: var(--text-2); opacity: 0.5; }
 
@@ -1530,6 +1552,10 @@
           <span class="layer-swatch" style="background:${swatchColor}"></span>
           <span class="layer-name">${escapeHtml(layer.name)}</span>
           <span class="layer-type-badge">${typeBadgeLabel(layer.type)}</span>
+          <span class="layer-move">
+            <button class="layer-up" title="上へ（手前に表示）" ${realIdx >= state.layers.length - 1 ? 'disabled' : ''}>▲</button>
+            <button class="layer-down" title="下へ（奥に表示）" ${realIdx <= 0 ? 'disabled' : ''}>▼</button>
+          </span>
           <button class="layer-vis-toggle ${layer.visible ? '' : 'hidden-layer'}" data-id="${layer.id}" title="表示切替">
             ${layer.visible ? eyeOpenSvg() : eyeClosedSvg()}
           </button>
@@ -1537,7 +1563,7 @@
       `;
 
       item.addEventListener('click', (e) => {
-        if (e.target.closest('.layer-vis-toggle')) return;
+        if (e.target.closest('.layer-vis-toggle') || e.target.closest('.layer-move')) return;
         selectLayer(layer.id);
       });
 
@@ -1548,7 +1574,21 @@
         renderLayerList();
       });
 
-      // Drag reorder
+      // ▲▼ボタンで並び替え（スマホ等のタッチ操作用）
+      // 配列の末尾が最前面。表示上の「上へ」= 配列の +1 方向
+      const moveLayer = (delta) => {
+        const from = state.layers.indexOf(layer);
+        const to = from + delta;
+        if (from < 0 || to < 0 || to >= state.layers.length) return;
+        const [moved] = state.layers.splice(from, 1);
+        state.layers.splice(to, 0, moved);
+        renderLayerList();
+        reorderMapLayers();
+      };
+      item.querySelector('.layer-up').addEventListener('click', (e) => { e.stopPropagation(); moveLayer(+1); });
+      item.querySelector('.layer-down').addEventListener('click', (e) => { e.stopPropagation(); moveLayer(-1); });
+
+      // Drag reorder（PC用）
       item.addEventListener('dragstart', (e) => {
         dragSrcIdx = realIdx;
         item.classList.add('dragging');
